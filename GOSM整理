@@ -1,0 +1,292 @@
+Sub GOSM()
+    Dim mainWb As Workbook
+    Dim dataWb As Workbook
+    Dim ws1 As Worksheet, ws2 As Worksheet
+    Dim wsData As Worksheet
+    Dim lastRow As Long, pasteRow As Long, lastNewRow As Long, sourceRow As Long
+    Dim inputData As Variant, resultDate() As Variant, resultTime() As Variant
+    Dim i As Long, j As Long, dt As Variant, rawText As String
+    Dim formulaCols As Variant, col As Variant
+    Dim copyData As Variant
+    Dim folderPath As String, gosmFile As String, fileName As String
+    Dim missingFiles As String
+    Dim ws11File As String, ws13File As String, ws14File As String
+    Dim ws12Files() As String
+    Dim ws12Count As Long
+    Dim fso As Object, folder As Object, file As Object
+
+    ' --- 效能優化開關 ---
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    ' --- 選擇資料夾 ---
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "選擇包含 GOSM 檔案的資料夾"
+        If .Show = -1 Then
+            folderPath = .SelectedItems(1)
+            ' 確保 folderPath 以反斜槓結尾
+            If Right(folderPath, 1) <> "\" Then folderPath = folderPath & "\"
+        Else
+            MsgBox "未選擇資料夾，程式結束。", vbExclamation
+            GoTo Cleanup
+        End If
+    End With
+
+    ' --- 初始化 FileSystemObject ---
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(folderPath) Then
+        MsgBox "選擇的資料夾不存在，請確認路徑：" & folderPath, vbExclamation
+        GoTo Cleanup
+    End If
+    Set folder = fso.GetFolder(folderPath)
+
+    ' --- 搜尋主工作簿（GOSM-） ---
+    Debug.Print "搜尋資料夾: " & folderPath
+    gosmFile = ""
+    For Each file In folder.Files
+        fileName = file.Name
+        If LCase(fso.GetExtensionName(fileName)) = "xlsx" Or LCase(fso.GetExtensionName(fileName)) = "xlsm" Then
+            If InStr(1, fileName, "GOSM-", vbTextCompare) > 0 Then
+                gosmFile = folderPath & fileName
+                Debug.Print "找到主工作簿: " & gosmFile
+                Exit For
+            End If
+        End If
+    Next file
+
+    If gosmFile = "" Then
+        MsgBox "資料夾中未找到包含 'GOSM-' 的 Excel 檔案。", vbExclamation
+        GoTo Cleanup
+    End If
+
+    ' --- 開啟主工作簿 ---
+    Debug.Print "載入主工作簿: " & gosmFile
+    Set mainWb = Workbooks.Open(gosmFile)
+    Set ws1 = mainWb.Sheets(1)
+    Set ws2 = mainWb.Sheets(2)
+    missingFiles = ""
+
+    ' --- 搜尋資料檔案 ---
+    Debug.Print "開始搜尋資料檔案..."
+    ws11File = "": ws13File = "": ws14File = ""
+    ws12Count = 0
+    ReDim ws12Files(0 To 100) ' 假設最多 100 個 ws12 檔案
+    Dim unmatchedFiles As String
+    unmatchedFiles = ""
+
+    Debug.Print "資料夾中的所有檔案："
+    Dim fileCount As Long
+    fileCount = 0
+    For Each file In folder.Files
+        fileName = file.Name
+        If LCase(fso.GetExtensionName(fileName)) = "xlsx" Or LCase(fso.GetExtensionName(fileName)) = "xlsm" Or LCase(fso.GetExtensionName(fileName)) = "csv" Then
+            fileCount = fileCount + 1
+            Debug.Print "  檔案: " & fileName
+            If InStr(1, fileName, "GOSM-", vbTextCompare) = 0 Then ' 排除主工作簿
+                If InStr(1, fileName, "代收", vbTextCompare) > 0 Then
+                    ws11File = folderPath & fileName
+                    Debug.Print "找到 ws11 檔案: " & fileName
+                ElseIf InStr(1, fileName, "代付", vbTextCompare) > 0 Then
+                    ws13File = folderPath & fileName
+                    Debug.Print "找到 ws13 檔案: " & fileName
+                ElseIf InStr(1, fileName, "提出", vbTextCompare) > 0 Or _
+                       InStr(1, fileName, "入", vbTextCompare) > 0 Or _
+                       InStr(1, fileName, "?入", vbTextCompare) > 0 Then
+                    ws12Files(ws12Count) = folderPath & fileName
+                    ws12Count = ws12Count + 1
+                    Debug.Print "找到 ws12 檔案: " & fileName
+                Else
+                    unmatchedFiles = unmatchedFiles & fileName & ", "
+                    Debug.Print "未匹配的檔案: " & fileName
+                End If
+            End If
+        End If
+    Next file
+
+    If fileCount = 0 Then
+        Debug.Print "錯誤：資料夾中未找到任何 .xlsx 或 .xlsm 檔案"
+        MsgBox "資料夾中未找到任何 .xlsx 或 .xlsm 檔案，請檢查資料夾內容。", vbExclamation
+        GoTo Cleanup
+    End If
+
+    ' --- 調整 ws12Files 大小 ---
+    If ws12Count > 0 Then
+        ReDim Preserve ws12Files(0 To ws12Count - 1)
+    Else
+        missingFiles = missingFiles & "入 或 提出 或 ?入, "
+        Debug.Print "未找到 ws12 檔案"
+    End If
+
+    ' --- 輸出未匹配的檔案 ---
+    If Len(unmatchedFiles) > 0 Then
+        unmatchedFiles = Left(unmatchedFiles, Len(unmatchedFiles) - 2)
+        Debug.Print "未匹配的檔案清單: " & unmatchedFiles
+    End If
+
+    ' --- 處理 ws11 檔案 ---
+    If ws11File <> "" Then
+        Debug.Print "處理 ws11 檔案: " & ws11File
+        Set dataWb = Workbooks.Open(ws11File)
+        Set wsData = dataWb.Sheets(1)
+        lastRow = wsData.Cells(wsData.Rows.Count, "A").End(xlUp).Row
+        wsData.Columns("B").Resize(, 2).Insert Shift:=xlToRight
+        inputData = wsData.Range("A1:A" & lastRow).Value
+        ReDim resultDate(1 To lastRow, 1 To 1): ReDim resultTime(1 To lastRow, 1 To 1)
+        For i = 1 To lastRow
+            dt = inputData(i, 1)
+            If IsDate(dt) Then
+                resultDate(i, 1) = Format(dt, "yyyy/mm/dd")
+                resultTime(i, 1) = Format(dt, "HH:mm:ss")
+            End If
+        Next i
+        wsData.Range("A1:A" & lastRow).Value = resultDate
+        wsData.Range("B1:B" & lastRow).Value = resultTime
+        wsData.Range("A:A").NumberFormat = "yyyy/mm/dd"
+        wsData.Range("B:B").NumberFormat = "HH:mm:ss"
+        wsData.Range("I:I,J:J,M:M,N:N,P:P").Delete
+        Debug.Print "完成 ws11 處理"
+
+        ' 合併到 ws1
+        lastRow = wsData.Cells(wsData.Rows.Count, "A").End(xlUp).Row
+        If lastRow > 1 Then
+            copyData = wsData.Range("A2:K" & lastRow).Value
+            pasteRow = ws1.Cells(ws1.Rows.Count, "B").End(xlUp).Row + 1
+            ws1.Range("B" & pasteRow).Resize(UBound(copyData), UBound(copyData, 2)).Value = copyData
+            Debug.Print "ws11 資料已合併到 ws1"
+        End If
+        dataWb.Save
+        dataWb.Close SaveChanges:=True
+    Else
+        missingFiles = missingFiles & "代收, "
+        Debug.Print "未找到 ws11 檔案"
+    End If
+
+    ' --- 處理 ws12 檔案（多個） ---
+    If ws12Count > 0 Then
+        Debug.Print "開始處理 ws12 檔案..."
+        For j = 0 To ws12Count - 1
+            Debug.Print "處理 ws12 檔案: " & ws12Files(j)
+            Set dataWb = Workbooks.Open(ws12Files(j))
+            Set wsData = dataWb.Sheets(1)
+            lastRow = wsData.Cells(wsData.Rows.Count, "A").End(xlUp).Row
+            wsData.Columns("B").Resize(, 2).Insert Shift:=xlToRight
+            inputData = wsData.Range("A1:A" & lastRow).Value
+            ReDim resultDate(1 To lastRow, 1 To 1): ReDim resultTime(1 To lastRow, 1 To 1)
+            For i = 1 To lastRow
+                dt = inputData(i, 1)
+                If IsDate(dt) Then
+                    resultDate(i, 1) = Format(dt, "yyyy/mm/dd")
+                    resultTime(i, 1) = Format(dt, "HH:mm:ss")
+                End If
+            Next i
+            wsData.Range("A1:A" & lastRow).Value = resultDate
+            wsData.Range("B1:B" & lastRow).Value = resultTime
+            wsData.Range("A:A").NumberFormat = "yyyy/mm/dd"
+            wsData.Range("B:B").NumberFormat = "HH:mm:ss"
+            wsData.Range("I:K").Delete
+            Debug.Print "完成 ws12 處理: " & ws12Files(j)
+
+            ' 合併到 ws1
+            lastRow = wsData.Cells(wsData.Rows.Count, "A").End(xlUp).Row
+            If lastRow > 1 Then
+                copyData = wsData.Range("A2:K" & lastRow).Value
+                pasteRow = ws1.Cells(ws1.Rows.Count, "B").End(xlUp).Row + 1
+                ws1.Range("B" & pasteRow).Resize(UBound(copyData), UBound(copyData, 2)).Value = copyData
+                Debug.Print "ws12 資料已合併到 ws1: " & ws12Files(j)
+            End If
+            dataWb.Save
+            dataWb.Close SaveChanges:=True
+        Next j
+    Else
+        Debug.Print "無 ws12 檔案可處理"
+    End If
+
+    ' --- 自動填充 ws1 公式 ---
+    lastNewRow = ws1.Cells(ws1.Rows.Count, "B").End(xlUp).Row
+    formulaCols = Array("A", "D", "M", "N")
+    For Each col In formulaCols
+        sourceRow = ws1.Cells(ws1.Rows.Count, col).End(xlUp).Row
+        If sourceRow < lastNewRow Then
+            ws1.Range(col & sourceRow).AutoFill Destination:=ws1.Range(col & sourceRow & ":" & col & lastNewRow)
+        End If
+    Next col
+    Debug.Print "完成 ws1 的公式自動填充"
+
+    ' --- 處理 ws13 檔案 ---
+    If ws13File <> "" Then
+        Debug.Print "處理 ws13 檔案: " & ws13File
+        Set dataWb = Workbooks.Open(ws13File)
+        Set wsData = dataWb.Sheets(1)
+        wsData.Columns("J").Resize(, 2).Insert Shift:=xlToRight
+        lastRow = wsData.Cells(wsData.Rows.Count, "I").End(xlUp).Row
+        inputData = wsData.Range("I1:I" & lastRow).Value
+        ReDim resultDate(1 To lastRow, 1 To 1): ReDim resultTime(1 To lastRow, 1 To 1)
+        For i = 1 To lastRow
+            dt = inputData(i, 1)
+            If IsDate(dt) Then
+                resultDate(i, 1) = Format(dt, "yyyy/mm/dd")
+                resultTime(i, 1) = Format(dt, "HH:mm:ss")
+            End If
+        Next i
+        wsData.Range("I1:I" & lastRow).Value = resultDate
+        wsData.Range("J1:J" & lastRow).Value = resultTime
+        wsData.Range("I:I").NumberFormat = "yyyy/mm/dd"
+        wsData.Range("J:J").NumberFormat = "HH:mm:ss"
+        wsData.Range("B:B,C:C").Delete
+        Debug.Print "完成 ws13 處理"
+
+        ' 合併到 ws2
+        lastRow = wsData.Cells(wsData.Rows.Count, "A").End(xlUp).Row
+        If lastRow > 1 Then
+            copyData = wsData.Range("A2:L" & lastRow).Value
+            pasteRow = ws2.Cells(ws2.Rows.Count, "A").End(xlUp).Row + 1
+            ws2.Range("A" & pasteRow).Resize(UBound(copyData), UBound(copyData, 2)).Value = copyData
+            Debug.Print "ws13 資料已合併到 ws2"
+        End If
+        lastNewRow = ws2.Cells(ws2.Rows.Count, "A").End(xlUp).Row
+        formulaCols = Array("I", "M")
+        For Each col In formulaCols
+            sourceRow = ws2.Cells(ws2.Rows.Count, col).End(xlUp).Row
+            If sourceRow < lastNewRow Then
+                ws2.Range(col & sourceRow).AutoFill Destination:=ws2.Range(col & sourceRow & ":" & col & lastNewRow)
+            End If
+        Next col
+        dataWb.Save
+        dataWb.Close SaveChanges:=True
+    Else
+        missingFiles = missingFiles & "代付, "
+        Debug.Print "未找到 ws13 檔案"
+    End If
+
+    ' --- 刷新主工作簿的樞紐分析表 ---
+    Debug.Print "正在刷新主工作簿的樞紐分析表..."
+    Dim wsNums As Variant, wsIndex As Variant
+    Dim pivotWS As Worksheet, pt As PivotTable
+    wsNums = Array(3)
+    For Each wsIndex In wsNums
+        Set pivotWS = mainWb.Sheets(wsIndex)
+        For Each pt In pivotWS.PivotTables
+            pt.RefreshTable
+        Next pt
+    Next wsIndex
+    Debug.Print "完成樞紐分析表刷新"
+
+    ' --- 儲存並關閉主工作簿 ---
+    mainWb.Save
+    Debug.Print "主工作簿已儲存並關閉"
+
+    ' --- 通知使用者缺失的檔案 ---
+    If Len(missingFiles) > 0 Then
+        missingFiles = Left(missingFiles, Len(missingFiles) - 2) ' 移除最後的逗號和空格
+        MsgBox "以下檔案未找到，已跳過處理：" & vbCrLf & missingFiles, vbExclamation
+    End If
+
+Cleanup:
+    ' --- 還原效能設定 ---
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+
+    MsgBox "更新完成", vbInformation
+End Sub
