@@ -1,6 +1,7 @@
 # VBA 巨集 Excel 資料處理工具
 
-本儲存庫包含一組 VBA 巨集，專為處理和整理 Excel 檔案中的財務資料而設計，用於資料對帳和報表生成。每個巨集針對特定財務資料類型（如帳變、支付渠道、交易記錄等）提供專屬功能。以下是各巨集的功能概述、使用說明和檔案結構。
+本儲存庫包含一組 VBA 巨集，專為處理和整理 Excel 檔案中的財務資料而設計，用於資料對帳和報表生成。
+每個巨集針對特定財務資料類型（如帳變、支付渠道、交易記錄等）提供專屬功能。以下是各巨集的功能概述、使用說明和檔案結構。
 
 ## 目錄
 - [巴西帳變整理](#巴西帳變整理)
@@ -20,7 +21,6 @@
 **功能**：
 - 提示使用者選擇多個 Excel 檔案（.xlsx、.xls）進行合併。
 - 將資料合併到新工作簿中，後續檔案的資料從第二行開始附加（排除標題）。
-- 套用格式：設置字型為 Calibri（大小 11），使用固定寬度文字分列，移除多餘欄位，並清理特定欄位（例如移除 G 欄中的 "-*"）。
 - 將合併後的資料儲存到使用者選擇的目標 Excel 檔案，並刷新其中的樞紐分析表。
 - 允許連續合併，提示使用者是否處理更多檔案。
 
@@ -88,39 +88,6 @@
 - 動態更新樞紐分析表。
 - 處理基於子資料夾的資料。
 
-## 使用說明
-1. **啟用巨集**：確保 Excel 已啟用巨集以執行 VBA 腳本。
-2. **準備檔案**：將輸入檔案放置在各巨集所需的資料夾結構中（例如 TR 檔案的子資料夾、GOSM 主工作簿或 AP 模板）。
-3. **執行巨集**：
-   - 開啟包含這些巨集的 Excel 檔案。
-   - 從 VBA 編輯器執行所需巨集，或將其分配到按鈕。
-   - 根據提示選擇輸入檔案或資料夾。
-4. **檢查輸出**：在指定位置檢查生成的或更新的 Excel 檔案。
-5. **重複執行（若適用）**：部分巨集（例如巴西帳變整理）允許透過提示連續處理更多檔案。
-
-## 檔案結構
-- **輸入檔案**：
-  - Excel 檔案（.xlsx、.xls、.xlsm），需符合特定命名規則（例如「TR_*.xlsx」、「GOSM-*.xlsx」、包含「AP」、「代收」等）。
-  - 按各巨集要求組織在資料夾或子資料夾中。
-- **輸出檔案**：
-  - 合併後的 Excel 檔案（.xlsx 或 .xlsm），儲存到使用者指定或預定義的位置。
-  - 示例輸出名稱：「MMDD-九平台支付.xlsx」、「(資料夾名稱)MMDD充提.xlsm」或更新的主工作簿。
-
-## 系統需求
-- **Microsoft Excel**：支援 VBA 的版本（例如 Excel 2016 或更新版本）。
-- **Windows 作業系統**：巨集使用 `Scripting.FileSystemObject` 進行檔案處理，僅適用於 Windows。
-- **檔案存取權限**：確保對輸入和輸出檔案目錄具有讀寫權限。
-- **巨集啟用環境**：儲存包含巨集的工作簿為 .xlsm 格式。
-
-## 注意事項
-- **錯誤處理**：巨集包含錯誤處理機制，以應對檔案存取問題或遺漏檔案，並透過訊息框通知使用者。
-- **效能**：執行期間會停用螢幕更新和提示以提升效能，完成後會重新啟用。
-- **檔案命名**：確保輸入檔案遵循預期的命名規則，以避免處理錯誤。
-- **備份**：執行巨集前請備份檔案，因為巨集可能會覆蓋或修改現有資料。
-- **除錯**：如遇問題，可檢查 VBA 除錯輸出（Debug.Print）以獲取詳細處理日誌。
-
-如有問題或貢獻，請在此儲存庫開啟 issue 或 pull request。
-
 ---
 
 ## English Version
@@ -146,7 +113,6 @@ This repository contains a collection of VBA macros designed to process and orga
 **Functionality**:
 - Prompts the user to select multiple Excel files (.xlsx, .xls) to merge.
 - Combines data into a new workbook, appending rows from subsequent files (excluding headers after the first file).
-- Applies formatting: sets font to Calibri (size 11), splits columns using fixed-width text-to-columns, removes unnecessary columns, and cleans specific columns (e.g., removing "-*" from column G).
 - Saves the merged data into a user-selected target Excel file and refreshes any pivot tables.
 - Allows continuous merging by prompting the user to process additional files.
 
@@ -213,36 +179,3 @@ This repository contains a collection of VBA macros designed to process and orga
 - Supports multiple AP file types.
 - Updates pivot tables dynamically.
 - Handles subfolder-based processing.
-
-## Usage Instructions
-1. **Enable Macros**: Ensure macros are enabled in Excel to run the VBA scripts.
-2. **Prepare Files**: Place input files in the appropriate folder structure as required by each macro (e.g., subfolders for TR files, a main GOSM workbook, or AP templates).
-3. **Run Macros**:
-   - Open the Excel file containing these macros.
-   - Run the desired macro from the VBA editor or assign it to a button.
-   - Follow the file/folder selection prompts to choose input files or directories.
-4. **Review Output**: Check the generated or updated Excel files in the specified locations for results.
-5. **Repeat (if applicable)**: Some macros (e.g., Brazil Account Change Consolidation) allow continuous processing by prompting for additional files.
-
-## File Structure
-- **Input Files**:
-  - Excel files (.xlsx, .xls, .xlsm) with specific naming conventions (e.g., "TR_*.xlsx", "GOSM-*.xlsx", files containing "AP", "代收", etc.).
-  - Organized in folders or subfolders as required by each macro.
-- **Output Files**:
-  - Consolidated Excel files (.xlsx or .xlsm) saved in user-specified or predefined locations.
-  - Example output names: "MMDD-九平台支付.xlsx", "(FolderName)MMDD充提.xlsm", or updated main workbooks.
-
-## Requirements
-- **Microsoft Excel**: Version supporting VBA (e.g., Excel 2016 or later).
-- **Windows OS**: Macros use `Scripting.FileSystemObject` for file handling, which is Windows-specific.
-- **File Access**: Ensure read/write access to input and output file directories.
-- **Macro-Enabled Environment**: Save the workbook containing these macros as .xlsm.
-
-## Notes
-- **Error Handling**: Macros include error handling to manage file access issues or missing files, with user notifications via message boxes.
-- **Performance**: Screen updating and alerts are disabled during execution to improve performance; they are re-enabled upon completion.
-- **File Naming**: Ensure input files follow expected naming conventions to avoid processing errors.
-- **Backup**: Always back up files before running macros, as they may overwrite or modify existing data.
-- **Debugging**: Check the VBA debug output (Debug.Print) for detailed processing logs if issues arise.
-
-For issues or contributions, please open an issue or pull request on this repository.
