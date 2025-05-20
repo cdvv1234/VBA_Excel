@@ -1,0 +1,224 @@
+Sub 菲包充提整理()
+    Dim fd As FileDialog
+    Dim parentFolderPath As String
+
+    ' 顯示文件夾選擇對話框
+    Set fd = Application.FileDialog(msoFileDialogFolderPicker)
+    fd.Title = "選擇要處理的主資料夾"
+    fd.AllowMultiSelect = False
+    
+    If fd.Show = -1 Then
+        parentFolderPath = fd.SelectedItems(1) & "\"
+    Else
+        MsgBox "未選擇資料夾。"
+        Exit Sub
+    End If
+    
+    ProcessSubFoldersForAP parentFolderPath
+
+    MsgBox "所有檔案處理完成！"
+End Sub
+
+Sub ProcessSubFoldersForAP(parentFolderPath As String)
+    Dim fileSystem As Object
+    Dim subfolder As Object
+    Dim folderPath As String
+    Const filePatternTR As String = "TR_*.xlsx"
+
+    ' 使用 FileSystemObject 遍歷子資料夾
+    Set fileSystem = CreateObject("Scripting.FileSystemObject")
+    
+    For Each subfolder In fileSystem.GetFolder(parentFolderPath).subfolders
+        folderPath = subfolder.Path & "\"
+        ProcessTRAndAPFiles folderPath, filePatternTR, parentFolderPath, fileSystem
+    Next subfolder
+End Sub
+
+Sub ProcessTRAndAPFiles(folderPath As String, filePatternTR As String, parentFolderPath As String, fileSystem As Object)
+    Dim fileName As String
+    Dim wb As Workbook
+    Dim apWorkbook As Workbook
+    Dim apWs As Worksheet
+    Dim trWs As Worksheet
+    Dim folder As Object
+    Dim folderName As String
+    Dim lastRowTR As Long
+    Dim i As Long
+    Dim copyRange As Range
+    Dim templatePath As String
+    Dim saveFileName As String
+    Dim trDate As String
+
+    ' 取得資料夾資訊
+    Set folder = fileSystem.GetFolder(folderPath)
+    folderName = folder.Name
+
+    ' 在外層資料夾中尋找包含 "AP" 字眼的 .xlsm 檔案作為模板
+    fileName = Dir(parentFolderPath & "*.xlsm")
+    Do While fileName <> ""
+        If InStr(UCase(fileName), "AP") > 0 Then
+            templatePath = parentFolderPath & fileName
+            Exit Do
+        End If
+        fileName = Dir
+    Loop
+
+    ' 如果沒有找到 AP 模板檔案，則跳出
+    If templatePath = "" Then
+        MsgBox "外層資料夾中未找到包含 'AP' 字眼的 .xlsm 模板檔案。"
+        Exit Sub
+    End If
+
+    ' 處理 TR_XX 檔案
+    fileName = Dir(folderPath & filePatternTR)
+    Do While fileName <> ""
+        ' 重命名 TR 檔案
+        Dim oldFilePath As String: oldFilePath = folderPath & fileName
+        Dim newFilePath As String: newFilePath = folderPath & "TR_" & folderName & ".xlsx"
+        
+        On Error Resume Next
+        Name oldFilePath As newFilePath
+        If Err.Number <> 0 Then
+            MsgBox "無法重新命名檔案: " & oldFilePath & vbCrLf & "錯誤信息: " & Err.Description
+            Err.Clear
+        End If
+        On Error GoTo 0
+        
+        ' 打開 TR 檔案並處理
+        On Error Resume Next
+        Set wb = Workbooks.Open(newFilePath)
+        If wb Is Nothing Then
+            MsgBox "無法開啟 TR 檔案: " & newFilePath
+            Exit Sub
+        End If
+        On Error GoTo 0
+
+        ' 清理 TR 資料
+        Application.DisplayAlerts = False
+        Application.ScreenUpdating = False
+        CleanTRData wb
+
+        ' 取得 TR 檔案 A 欄日期（取第一筆有效日期）
+        Set trWs = wb.Sheets(1)
+        lastRowTR = trWs.Cells(trWs.Rows.Count, "A").End(xlUp).Row
+        trDate = ""
+        For i = 2 To lastRowTR
+            If IsDate(trWs.Cells(i, "A").Value) Then
+                trDate = Format(trWs.Cells(i, "A").Value, "mmdd")
+                Exit For
+            End If
+        Next i
+        If trDate = "" Then trDate = Format(Date, "mmdd") ' 若無有效日期，使用當天
+
+        ' 打開 AP 模板
+        On Error Resume Next
+        Set apWorkbook = Workbooks.Open(templatePath)
+        If apWorkbook Is Nothing Then
+            MsgBox "無法開啟 AP 模板檔案: " & templatePath
+            wb.Close SaveChanges:=False
+            Exit Sub
+        End If
+        On Error GoTo 0
+
+        Set apWs = apWorkbook.Sheets("上下分紀錄")
+        
+        ' 清除 AP 工作表「上下分紀錄」從第二列開始的內容（保留標題列）
+        If apWs.Cells(Rows.Count, "A").End(xlUp).Row > 1 Then
+            apWs.Range("A2:K" & apWs.Cells(Rows.Count, "A").End(xlUp).Row).ClearContents
+        End If
+
+        ' 複製 TR 資料到 AP 模板，從第二列開始貼上，範圍為 A2:K
+        For i = 2 To lastRowTR
+            If trWs.Cells(i, "B").Value <> "" Then
+                If copyRange Is Nothing Then
+                    Set copyRange = trWs.Range("A" & i & ":K" & i)
+                Else
+                    Set copyRange = Union(copyRange, trWs.Range("A" & i & ":K" & i))
+                End If
+            End If
+        Next i
+        If Not copyRange Is Nothing Then
+            copyRange.Copy
+            apWs.Cells(2, 1).PasteSpecial Paste:=xlPasteValues
+            apWs.Cells(2, 1).PasteSpecial Paste:=xlPasteFormats
+        End If
+
+        ' 儲存並關閉 TR 檔案
+        wb.Save
+        wb.Close SaveChanges:=True
+
+        ' 另存 AP 檔案到外層資料夾，並保持打開狀態
+        saveFileName = "(" & folderName & ")" & trDate & "充提.xlsm"
+        newFilePath = parentFolderPath & saveFileName
+        apWorkbook.SaveAs newFilePath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
+
+        ' 重新啟用提示視窗
+        Application.DisplayAlerts = True
+        Application.ScreenUpdating = True
+
+        ' 取得下一個符合模式的檔案
+        fileName = Dir
+    Loop
+End Sub
+
+Sub CleanTRData(wb As Workbook)
+    Dim ws As Worksheet
+    Dim lastRowE As Long, lastRowG As Long, lastRowI As Long
+    
+    For Each ws In wb.Worksheets
+        With ws
+            ' 動態範圍處理 E 欄
+            lastRowE = .Cells(.Rows.Count, "E").End(xlUp).Row
+            If lastRowE > 1 Then
+                .Range("E1:E" & lastRowE).Replace What:="+", Replacement:="充值", LookAt:=xlPart
+                .Range("E1:E" & lastRowE).Replace What:="-", Replacement:="提款", LookAt:=xlPart
+            End If
+            
+            ' 動態範圍處理 G 欄
+            lastRowG = .Cells(.Rows.Count, "G").End(xlUp).Row
+            If lastRowG > 1 Then
+                .Range("G1:G" & lastRowG).TextToColumns Destination:=.Range("G1"), DataType:=xlDelimited, _
+                    TextQualifier:=xlDoubleQuote, ConsecutiveDelimiter:=False, Tab:=False, _
+                    Semicolon:=False, Comma:=False, Space:=False, Other:=True, OtherChar:="(", _
+                    FieldInfo:=Array(1, 1), TrailingMinusNumbers:=True
+            End If
+            
+            ' 動態範圍處理 I 欄並填入 A 欄
+            lastRowI = .Cells(.Rows.Count, "I").End(xlUp).Row
+            If lastRowI > 1 Then
+                Dim arrI As Variant, arrA As Variant
+                arrI = .Range("I2:I" & lastRowI).Value
+                
+                ' 檢查 arrI 是否有效
+                If IsEmpty(arrI) Then GoTo SkipIColumn
+                If Not IsArray(arrI) Then
+                    ReDim tempArr(1 To 1, 1 To 1)
+                    tempArr(1, 1) = arrI
+                    arrI = tempArr
+                End If
+                
+                ReDim arrA(1 To UBound(arrI, 1), 1 To 1)
+                
+                Dim i As Long
+                For i = 1 To UBound(arrI, 1)
+                    If IsDate(arrI(i, 1)) Then
+                        arrA(i, 1) = Format(arrI(i, 1), "yyyy/mm/dd")
+                    Else
+                        arrA(i, 1) = ""
+                    End If
+                Next i
+                
+                .Range("A2:A" & lastRowI).Value = arrA
+            End If
+            
+SkipIColumn:
+            ' 設定 A 欄格式為日期
+            .Columns("A:A").NumberFormat = "yyyy/mm/dd"
+            
+            ' 刪除 I 欄
+            If lastRowI > 1 Then
+                .Range("I1:I" & lastRowI).Delete Shift:=xlToLeft
+            End If
+        End With
+    Next ws
+End Sub
