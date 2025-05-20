@@ -1,0 +1,168 @@
+Sub BC支付渠道整理()
+    Dim fd As FileDialog
+    Dim vrtSelectedItem As Variant
+    Dim filePath As String
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim originalName As String
+    Dim prefix As String
+    Dim newName As String
+    Dim newWorkbook As Workbook
+    Dim masterWs As Worksheet
+    Dim firstRow As Long
+    Dim lastRowToCopy As Long
+    Dim rng As Range
+    Dim isFirstFile As Boolean
+    Dim continueMerge As Boolean
+    Dim fileName As String
+    Dim todayDate As String
+    Dim replaceDate As String
+    
+
+    ' 禁用提示視窗
+    Application.DisplayAlerts = False
+    Application.ScreenUpdating = False
+    
+    continueMerge = True
+    
+    Do While continueMerge
+        ' 讓使用者選擇要合併的檔案
+        Set fd = Application.FileDialog(msoFileDialogFilePicker)
+        With fd
+            .Title = "選擇要合併的 Excel 檔案"
+            .Filters.Clear
+            .Filters.Add "Excel Files", "*.xlsx; *.xls"
+            .AllowMultiSelect = True
+            If .Show = -1 Then
+                ' 創建一個新的工作簿
+                Set newWorkbook = Workbooks.Add
+                Set masterWs = newWorkbook.Sheets(1)
+
+                isFirstFile = True
+
+                For Each vrtSelectedItem In .SelectedItems
+                    filePath = vrtSelectedItem
+
+                    On Error Resume Next
+                    Set wb = Workbooks.Open(filePath)
+                    If Err.Number <> 0 Then
+                        MsgBox "無法打開檔案: " & filePath, vbExclamation
+                        Err.Clear
+                        GoTo NextFile
+                    End If
+                    On Error GoTo 0
+
+                    Set ws = wb.Sheets(1)
+                    
+                    ' 獲取檔案名的前綴部分
+                    originalName = Mid(filePath, InStrRev(filePath, "\") + 1)
+                    prefix = Split(originalName, "_")(0)
+                    
+                    ' 將前綴轉為大寫
+                    newName = UCase(prefix)
+                    
+                    ' 更改當前工作表的名稱
+                    ws.Name = newName
+                    
+                    ' 將當前工作表移動到新工作簿的最後面
+                    ws.Copy After:=newWorkbook.Sheets(newWorkbook.Sheets.Count)
+                    
+                  ' 將資料表資料複製至新工作簿，已經遇到標題則不複製
+                    If Not ws.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlNext) Is Nothing Then
+                        firstRow = ws.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlNext).Row
+                        lastRowToCopy = ws.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlPrevious).Row
+
+                        ' 在原工作表中新增一欄並填充數據
+                        ws.Columns("A:A").Insert Shift:=xlToRight
+                        ws.Cells(1, 1).Value = "平台"
+                        ws.Range("A2:A" & lastRowToCopy).Value = newName
+                        Set rng = ws.Rows(firstRow & ":" & lastRowToCopy)
+                    
+                        If isFirstFile Then
+
+                            ' 複製整個範圍到新工作表
+                            rng.Copy
+                            masterWs.Cells(1, 1).PasteSpecial Paste:=xlPasteValues
+                        
+                            isFirstFile = False
+                        Else
+                            ' 從第二行開始插入資料
+                            masterLastRow = masterWs.Cells(masterWs.Rows.Count, 1).End(xlUp).Row + 1
+                            rng.Offset(1, 0).Resize(rng.Rows.Count - 1).Copy
+                            masterWs.Cells(masterLastRow, 1).PasteSpecial Paste:=xlPasteValues
+
+                        End If
+                    End If
+                        
+                    wb.Close SaveChanges:=False
+
+NextFile:
+                DoEvents
+                Next vrtSelectedItem
+                
+                ' 格式化新工作簿
+                With masterWs
+                
+                ' 取得今天的日期並格式化
+                todayDate = Format(Date, "m/d/yyyy")
+                replaceDate = Format(Date - 1, "m/d/yyyy")
+                
+                ' 1. 剪切 G 欄到 A 欄前面
+                    .Columns("G:G").Cut
+                    .Columns("A:A").Insert Shift:=xlToRight
+                    
+                    ' 2. 在 B 欄左側插入兩欄
+                    .Columns("B:C").Insert Shift:=xlToRight
+                    
+                    ' 3. 使用固定寬度剖析 A 欄資料
+                    .Columns("A:A").TextToColumns Destination:=.Range("A1"), DataType:=xlFixedWidth, _
+                        FieldInfo:=Array(Array(0, 1), Array(10, 1))
+                    
+                    ' 4. C 欄填入公式並填充
+                    .Range("C2").Formula = "=HOUR(B2)"
+                    .Range("C2:C" & .Cells(.Rows.Count, "B").End(xlUp).Row).FillDown
+                    
+                    ' 5. C 欄公式轉為值
+                    .Range("C2:C" & .Cells(.Rows.Count, "C").End(xlUp).Row).Value = .Range("C2:C" & .Cells(.Rows.Count, "C").End(xlUp).Row).Value
+                    
+                    ' 6. 在 G 欄左側插入一欄
+                    .Columns("H:H").Insert Shift:=xlToRight
+                    
+                    ' 7. 刪除 B 欄
+                    .Columns("B:B").Delete Shift:=xlToLeft
+                    
+                    ' 8. 更新 A 欄日期
+                    .Columns("A:A").Replace What:=todayDate, Replacement:=replaceDate, LookAt:=xlPart
+                                        
+                    ' 9. 篩選 I 欄為 success
+                    With .Range("$A$1:$J" & .Cells(.Rows.Count, "I").End(xlUp).Row)
+                        .AutoFilter Field:=10, Criteria1:="success"
+                    End With
+                    
+                    .Columns("A:J").AutoFit
+                        
+                ' 儲存新工作簿
+                masterWs.Name = Format(Now - 1, "mmdd") & "-九平台支付"
+                fileName = Format(Now - 1, "mmdd") & "-九平台支付" & ".xlsx"
+                newWorkbook.SaveAs fileName:=fileName
+                ' 激活第一個工作表
+                    With newWorkbook.Sheets(1)
+                        .Activate
+                        
+                        ' 切回第一列
+                        .Cells(1, 1).Select
+                    End With
+                  End With
+            End If
+        End With
+        
+        continueMerge = False
+        
+        ' 設置 FileDialog 對象為 Nothing
+        Set fd = Nothing
+    Loop
+    
+        ' 重新啟用提示視窗
+        Application.DisplayAlerts = True
+        Application.ScreenUpdating = True
+End Sub
