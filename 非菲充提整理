@@ -1,0 +1,305 @@
+Sub 非菲充提與資料整理()
+    Dim fd As FileDialog
+    Dim selectedFolders As Collection
+    Dim folderPath As Variant
+
+    ' 顯示文件夾選擇對話框
+    Set fd = Application.FileDialog(msoFileDialogFolderPicker)
+    fd.Title = "選擇要處理的主資料夾"
+    fd.AllowMultiSelect = False
+    
+    If fd.Show = -1 Then
+        Set selectedFolders = New Collection
+        selectedFolders.Add fd.SelectedItems(1) & "\"
+    Else
+        MsgBox "未選擇資料夾。"
+        Exit Sub
+    End If
+    
+    ' 遍歷每個選擇的主資料夾
+    For Each folderPath In selectedFolders
+        ProcessSubFolders CStr(folderPath)
+    Next folderPath
+
+    MsgBox "所有檔案處理完成！"
+End Sub
+
+Sub ProcessSubFolders(parentFolderPath As String)
+    Dim folderPath As String
+    Dim subfolder As Object
+    Dim filePatternTR As String
+
+    ' 設定檔案名稱模式
+    filePatternTR = "TR_*.xlsx"
+
+    ' 使用 FileSystemObject 遍歷子資料夾
+    Dim fileSystem As Object
+    Set fileSystem = CreateObject("Scripting.FileSystemObject")
+    
+    For Each subfolder In fileSystem.GetFolder(parentFolderPath).subfolders
+        folderPath = subfolder.Path & "\"
+        ProcessFilesInFolder folderPath, filePatternTR
+    Next subfolder
+
+    ' 釋放 FileSystemObject 資源
+    Set fileSystem = Nothing
+End Sub
+
+Sub ProcessFilesInFolder(folderPath As String, filePatternTR As String)
+    Dim fileName As String
+    Dim wb As Workbook
+    Dim apFilePath As String
+    Dim apWorkbook As Workbook
+    Dim apWs As Worksheet
+    Dim apWsSource As Worksheet
+    Dim trWs As Worksheet
+    Dim newFileName As String
+    Dim oldFilePath As String
+    Dim newFilePath As String
+    Dim suffix As String
+    Dim fileSystem As Object
+    Dim folder As Object
+    Dim folderName As String
+    Dim lastRowTR As Long
+    Dim nextRowAP As Long
+    Dim i As Long
+    Dim copyRange As Range
+    Dim foundAPFile As Boolean
+    Dim pt As PivotTable
+    Dim pf As PivotField
+    Dim filterDate As Date
+
+    ' 使用 FileSystemObject 遍歷資料夾
+    Set fileSystem = CreateObject("Scripting.FileSystemObject")
+    Set folder = fileSystem.GetFolder(folderPath)
+    folderName = folder.Name
+
+    ' 提取資料夾名稱中的後綴部分
+    If InStr(folderName, "_") > 0 Then
+        suffix = Mid(folderName, InStr(folderName, "_") + 1)
+    Else
+        suffix = folderName
+    End If
+
+    ' 查找 AP 檔案
+    foundAPFile = False
+    fileName = Dir(folderPath & "*.xlsx")
+    Do While fileName <> ""
+        If InStr(UCase(fileName), "(AP") > 0 Or _
+           InStr(UCase(fileName), "(TG") > 0 Or _
+           InStr(UCase(fileName), "(US") > 0 Or _
+           InStr(UCase(fileName), "(SA") > 0 Or _
+           InStr(UCase(fileName), "(IN") > 0 Or _
+           InStr(UCase(fileName), "(ICT") > 0 Then
+            foundAPFile = True
+            apFilePath = folderPath & fileName
+            Exit Do
+        End If
+        fileName = Dir
+    Loop
+
+    ' 如果沒有找到 AP 檔案，處理 TR 檔案
+    If Not foundAPFile Then
+        fileName = Dir(folderPath & filePatternTR)
+        Do While fileName <> ""
+            oldFilePath = folderPath & fileName
+            newFileName = "TR_" & suffix & ".xlsx"
+            newFilePath = folderPath & newFileName
+            
+            On Error Resume Next
+            Name oldFilePath As newFilePath
+            If Err.Number <> 0 Then
+                MsgBox "無法重新命名檔案: " & oldFilePath & vbCrLf & "錯誤信息: " & Err.Description
+                Err.Clear
+            End If
+            On Error GoTo 0
+            
+            Set wb = Workbooks.Open(newFilePath)
+            ProcessTRFiles wb
+            
+            wb.Save
+            wb.Close SaveChanges:=True
+            Set wb = Nothing
+            
+            fileName = Dir
+        Loop
+        
+        Set fileSystem = Nothing
+        Exit Sub
+    End If
+
+    ' 打開 AP 工作簿
+    Set apWorkbook = Workbooks.Open(apFilePath)
+    
+    ' 處理 TR_XX 檔案
+    fileName = Dir(folderPath & filePatternTR)
+    Do While fileName <> ""
+        oldFilePath = folderPath & fileName
+        newFileName = "TR_" & suffix & ".xlsx"
+        newFilePath = folderPath & newFileName
+        
+        On Error Resume Next
+        Name oldFilePath As newFilePath
+        If Err.Number <> 0 Then
+            MsgBox "無法重新命名檔案: " & oldFilePath & vbCrLf & "錯誤信息: " & Err.Description
+            Err.Clear
+        End If
+        On Error GoTo 0
+        
+        Set wb = Workbooks.Open(newFilePath)
+        ProcessTRFiles wb
+
+        ' 確定 AP 工作簿中的工作表(上下分紀錄)
+        Set trWs = wb.Sheets(1)
+        Set apWs = apWorkbook.Sheets("上下分紀錄")
+        
+        ' 複製 TR_XX 的資料
+        lastRowTR = trWs.Cells(trWs.Rows.Count, "A").End(xlUp).Row
+        For i = 2 To lastRowTR
+            If trWs.Cells(i, "B").Value <> "" Then
+                If copyRange Is Nothing Then
+                    Set copyRange = trWs.Range("A" & i & ":J" & i)
+                Else
+                    Set copyRange = Union(copyRange, trWs.Range("A" & i & ":J" & i))
+                End If
+            End If
+        Next i
+        If Not copyRange Is Nothing Then
+            copyRange.Copy
+            nextRowAP = apWs.Cells(apWs.Rows.Count, "A").End(xlUp).Row + 1
+            apWs.Cells(nextRowAP, 1).PasteSpecial Paste:=xlPasteValues
+            apWs.Cells(nextRowAP, 1).PasteSpecial Paste:=xlPasteFormats
+        End If
+        
+        wb.Save
+        wb.Close SaveChanges:=True
+        Set wb = Nothing
+        
+        fileName = Dir
+    Loop
+    
+    ' 釋放 FileSystemObject 資源
+    Set fileSystem = Nothing
+    
+    ' 儲存 AP 工作簿
+    apWorkbook.RefreshAll
+    
+    ' 獲取來源工作表
+    Set apWsSource = apWorkbook.Sheets("上下分紀錄")
+    
+    ' 獲取包含樞紐分析表的工作表
+    Set apWs = apWorkbook.Sheets("充提DATA")
+    
+    ' 獲取最後一行的日期
+    lastRowTR = apWsSource.Cells(apWsSource.Rows.Count, 1).End(xlUp).Row
+    filterDate = apWsSource.Cells(lastRowTR, 1).Value
+    
+    ' 獲取樞紐分析表
+    Set pt = apWs.PivotTables("樞紐分析表1")
+    
+    ' 獲取篩選字段
+    Set pf = pt.PivotFields("日期")
+    
+    ' 清除現有的篩選
+    pf.ClearAllFilters
+    
+    ' 設定篩選日期
+    On Error Resume Next
+    For Each item In pf.PivotItems
+        item.Visible = (item.Value = filterDate)
+    Next item
+    On Error GoTo 0
+    
+    ' 激活工作表並切回第一列
+    On Error Resume Next
+    With apWorkbook.Sheets(5)
+        .Activate
+        .Range("F5:F28").Select
+    End With
+    If Err.Number <> 0 Then Err.Clear
+    
+    With apWorkbook.Sheets(4)
+        .Activate
+        .Cells(5, 1).Select
+    End With
+    If Err.Number <> 0 Then Err.Clear
+    
+    With apWorkbook.Sheets(2)
+        .Activate
+        .Cells(5, 1).Select
+    End With
+    
+    On Error GoTo 0
+    
+    ' 更新樞紐分析表
+    pt.RefreshTable
+    
+    apWorkbook.Save
+    apWorkbook.Close SaveChanges:=False
+    Set apWorkbook = Nothing
+End Sub
+
+Sub ProcessTRFiles(wb As Workbook)
+    Dim ws As Worksheet
+    Dim lastRowE As Long, lastRowG As Long, lastRowI As Long
+    
+    Application.DisplayAlerts = False
+    Application.ScreenUpdating = False
+    
+    For Each ws In wb.Worksheets
+        With ws
+            ' 動態範圍處理 E 欄
+            lastRowE = .Cells(.Rows.Count, "E").End(xlUp).Row
+            If lastRowE > 1 Then
+                .Range("E1:E" & lastRowE).Replace What:="+", Replacement:="充值", LookAt:=xlPart
+                .Range("E1:E" & lastRowE).Replace What:="-", Replacement:="提款", LookAt:=xlPart
+            End If
+            
+            ' 動態範圍處理 G 欄
+            lastRowG = .Cells(.Rows.Count, "G").End(xlUp).Row
+            If lastRowG > 1 Then
+                .Range("G1:G" & lastRowG).TextToColumns Destination:=.Range("G1"), DataType:=xlDelimited, _
+                    TextQualifier:=xlDoubleQuote, ConsecutiveDelimiter:=False, Tab:=False, _
+                    Semicolon:=False, Comma:=False, Space:=False, Other:=True, OtherChar:="(", _
+                    FieldInfo:=Array(1, 1), TrailingMinusNumbers:=True
+            End If
+            
+            ' 動態範圍處理 I 欄並填入 A 欄
+            lastRowI = .Cells(.Rows.Count, "I").End(xlUp).Row
+            If lastRowI > 1 Then
+                Dim arrI As Variant, arrA As Variant
+                arrI = .Range("I2:I" & lastRowI).Value
+                
+                If Not IsArray(arrI) Or Application.WorksheetFunction.CountA(arrI) = 1 Then
+                    ReDim tempArr(1 To 1, 1 To 1)
+                    tempArr(1, 1) = arrI
+                    arrI = tempArr
+                End If
+                
+                ReDim arrA(1 To UBound(arrI, 1), 1 To 1)
+                
+                Dim i As Long
+                For i = 1 To UBound(arrI, 1)
+                    If IsDate(arrI(i, 1)) Then
+                        arrA(i, 1) = Format(arrI(i, 1), "yyyy/mm/dd")
+                    Else
+                        arrA(i, 1) = ""
+                    End If
+                Next i
+                
+                .Range("A2:A" & lastRowI).Value = arrA
+            End If
+            
+            ' 設定 A 欄格式為日期
+            .Columns("A:A").NumberFormat = "yyyy/mm/dd"
+            
+            ' 刪除 I 欄
+            If lastRowI > 1 Then
+                .Range("I1:I" & lastRowI).Delete Shift:=xlToLeft
+            End If
+        End With
+    Next ws
+    
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+End Sub
